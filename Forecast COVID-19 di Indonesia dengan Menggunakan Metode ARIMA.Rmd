@@ -1,0 +1,811 @@
+---
+title: "Forecast COVID-19 Indonesia"
+author: "Ayu & Bella"
+date: "1/26/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#clear variabel
+```{r}
+rm(list=ls())
+```
+
+#Load the following libraries. 
+```{r message=FALSE, warning=FALSE}
+# package untuk memahami script/R
+library(tidyverse)
+# package for working with date
+library(lubridate)
+library(readr)
+# package for data wrangling/data manipulation
+library(dplyr)
+# package for visualization
+library(ggplot2)
+library(tidyr)
+library(glmnet)
+# tseries package for stationer data check
+library(tseries)
+# package for forecasting data
+library(forecast)
+# package for testing linear regression models
+library(lmtest)
+library(ggfortify)
+```
+
+#Data Preparation dan Cleaning - Dataset COVID-19 Indonesia Time Series
+# Tahapan OSEMN
+# 1. Obtain Data 
+```{r}
+covid  <- read.csv("~/Skripsi Covid-19/covid_19_indonesia_time_series_all.csv")
+names(covid)
+```
+# 2. Scrubbing Data
+```{r}
+# fungsi untuk menampilkan type data dari kolom atau variabel
+head(covid)
+```
+```{r}
+tail(covid)
+```
+```{r}
+# Hapus kolom yang tidak penting
+cvdclean <- covid %>%
+select(-City.or.Regency, -Country, -Continent, -Growth.Factor.of.New.Cases, -Growth.Factor.of.New.Deaths, -Special.Status, -Total.Regencies, -Total.Cities, -Total.Districts, -Total.Urban.Villages, -Total.Rural.Villages, -Province, -Time.Zone, -Area..km2., -Population, -Population.Density, -Longitude, -Latitude, -New.Cases.per.Million, -Total.Cases.per.Million, -New.Deaths.per.Million, -Total.Deaths.per.Million, -Case.Fatality.Rate, -Case.Recovered.Rate)
+```
+```{r}
+names(cvdclean)
+```
+```{r}
+glimpse(cvdclean)
+```
+```{r}
+# Lihat data yang missing value
+colSums(is.na(cvdclean))
+```
+```{r}
+# rubah nama kolom Date dan Area sehingga mudah dibaca
+colnames(cvdclean)[colnames(cvdclean) == "ï..Date"] = "Date"
+names(cvdclean)
+```
+```{r}
+# fungsi untuk menghilangkan nilai NA atau missing value
+covidclean <- na.omit(cvdclean)
+summary(covidclean)
+```
+```{r}
+glimpse(covidclean)
+```
+```{r}
+# fungsi head digunakan utk menampilkan 6 data teratas
+head(covidclean)
+```
+```{r}
+# fungsi tail digunakan utk menampilkan 6 data terbawah
+tail(covidclean)
+```
+```{r}
+# fungsi untuk melihat summary dari data
+summary(covidclean)
+```
+# 3. Exploratory Data Analysis (EDA)
+```{r}
+# fungsi ncol untuk menampilkan jumlah kolom data
+ncol(covidclean)
+# fungsi nrow untuk menampilkan jumlah baris data
+nrow(covidclean)
+# fungsi dim untuk menampilkan jumlah kolom dan baris data
+dim(covidclean)
+```
+```{r}
+# fungsi adf.test untuk mengecek kestasioneran data
+adf.test(covidclean$Total.Cases)
+```
+```{r}
+# Karena variabel Date dalam bentuk type data karakter, maka kita harus rubah kedalam bentuk type data (date) atau tanggal, dengan format mm.dd.yyyy
+covidd <- covidclean %>% 
+  mutate(Date = mdy (Date)) %>% 
+  arrange(Date)
+covidd
+```
+# Merubah type data Tanggal (date) menjadi Date
+```{r}
+covidd$Date <- as.Date(covidd$Date)
+```
+
+```{r}
+# order based on covid$date
+covidd <- covidd[order(covidd$Date), ]
+head(covidd)
+```
+```{r}
+# fungsi tail digunakan utk menampilkan 6 data terbawah
+tail(covidd)
+```
+```{r}
+ncol(covidd)
+nrow(covidd)
+```
+```{r}
+# Visualisasi Total kasus baru berdasarkan provinsi dengan jumlah penduduk terbanyak di Indonesia
+targetLocation1 <- c("DKI Jakarta", "Jawa Timur", "Jawa Tengah", "Jawa Barat", "Sumatera Utara")
+target <- subset(covidd, Location %in% targetLocation1)
+ggplot (data=target, 
+        mapping=aes(x=Date, y=Total.Cases, color=Location)) + geom_line() + 
+    theme_minimal()
+```
+```{r}
+# Visualisasi Total kematian berdasarkan provinsi dengan jumlah penduduk terbanyak di Indonesia
+targetLocation2 <- c("DKI Jakarta", "Jawa Timur", "Jawa Tengah", "Jawa Barat", "Sumatera Utara")
+target <- subset(covidd, Location %in% targetLocation2)
+ggplot (data=target, 
+        mapping=aes(x=Date, y=Total.Deaths, color=Location)) + geom_line() + 
+    theme_minimal()
+```
+```{r}
+indo_cases <- subset(covidd, Location=="Indonesia")
+ggplot (data=indo_cases, 
+        mapping=aes(x=indo_cases$Date, y=indo_cases$New.Cases, color=Location)) + geom_line() + theme_minimal()
+```
+```{r}
+indo_cases %>% 
+  ggplot(aes(x=Date, y=Total.Cases, main="Plot Kasus Baru COVID-19 di Indonesia" , col=Total.Cases)) +
+  geom_line() +
+  theme_minimal()
+```
+```{r}
+# Lihat data yang missing value
+colSums(is.na(indo_cases))
+```
+```{r}
+# New Cases perbulan di Indonesia
+Indo <- indo_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Cases))
+Indo
+```
+```{r}
+# New Deaths perbulan di Indonesia
+Indo1 <- indo_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Deaths))
+Indo1
+```
+```{r}
+# New Recovered perbulan di Indonesia
+Indo2 <- indo_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Recovered))
+Indo2
+```
+```{r}
+# New Active Cases perbulan di Indonesia
+Indo3 <- indo_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Active.Cases))
+Indo3
+```
+```{r}
+# Menampilkan kasus baru di Sumatera Utara
+su_cases <- subset(covidd, Location=="Sumatera Utara")
+ggplot (data=su_cases, 
+        mapping=aes(x=su_cases$Date, y=su_cases$New.Cases, color=Location)) + geom_line() + 
+    theme_minimal()
+```
+```{r}
+# New Cases perhari di Sumatera Utara
+SU <- su_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Cases))
+SU
+```
+```{r}
+# New Deaths perhari di Sumatera Utara
+SU1 <- su_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Deaths))
+SU1
+```
+```{r}
+# New Recovered perhari di Sumatera Utara
+SU2 <- su_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Recovered))
+SU2
+```
+```{r}
+# New Active Cases perhari di Sumatera Utara
+SU3 <- su_cases %>% 
+  mutate(first_date_month = floor_date(Date, unit = "month")) %>% 
+  group_by(first_date_month) %>% 
+  summarise(jumlah = sum (New.Active.Cases))
+SU3
+```
+```{r}
+# Visualisasi kasus baru dan meninggal di Sumatera Utara
+# warna biru : total kasus
+# warna merah : total pulih
+# warna kuning : total meninggal
+# warna hijau : total aktif
+plot(su_cases$Date, su_cases$Total.Cases, 
+     pch=19, 
+     cex=0.3, 
+     main="New Cases vs New Deaths in the North Sumatera",
+     sub="Data as of 28th August 2020",
+     las=1,
+     xlab="", ylab="",
+     type="l", 
+     col="blue", lty="solid")
+lines(su_cases$Date, su_cases$Total.Recovered, col="red", lwd=2, lty="dashed")
+lines(su_cases$Date, su_cases$Total.Deaths, col="yellow", lwd=2, lty="dashed")
+lines(su_cases$Date, su_cases$Total.Active.Cases, col="green", lwd=2, lty="dashed")
+```
+```{r}
+glimpse(su_cases)
+```
+```{r}
+# Menampilkan Visualisasi Total Kasus di Sumatera Utara
+su_cases %>% 
+ggplot (aes(x=Date, y=Total.Cases)) + 
+  geom_line(color = "tomato3") +
+  theme_minimal()
+```
+```{r}
+# Visualisasi kasus yang terkonfirmasi, meninggal dan sembuh di Indonesia
+options(scipen=1)
+plot(indo_cases$Date, indo_cases$Total.Cases, 
+     pch=19, 
+     cex=0.3, 
+     main="COVID-19 Cases in Indonesia",
+     sub="Data as of 30th Desember 2020",
+     las=1,
+     xlab="", ylab="")
+lines(indo_cases$Date, indo_cases$Total.Cases, col="cornsilk3", lwd=2)
+lines(indo_cases$Date, indo_cases$Total.Recovered, col="lightblue", lwd=2)
+lines(indo_cases$Date, indo_cases$Total.Deaths, col="lightpink", lwd=2)
+lines(indo_cases$Date, indo_cases$Total.Active.Cases, col="lightgreen", lwd=2)
+legend("top", fill=c("cornsilk3", "lightblue", "lightpink", "lightgreen"), legend=c("cases", "recovered", "deaths", "active"))
+```
+```{r}
+# Visualisasi kasus yang terkonfirmasi, meninggal dan sembuh di Sumatera Utara
+options(scipen=1)
+plot(su_cases$Date, su_cases$Total.Cases, 
+     pch=19, 
+     cex=0.3, 
+     main="COVID-19 Cases in Sumatera Utara",
+     sub="Data as of 31th October 2020",
+     las=1,
+     xlab="", ylab="")
+lines(su_cases$Date, su_cases$Total.Cases, col="cornsilk3", lwd=2)
+lines(su_cases$Date, su_cases$Total.Recovered, col="lightblue", lwd=2)
+lines(su_cases$Date, su_cases$Total.Deaths, col="lightpink", lwd=2)
+lines(su_cases$Date, su_cases$Total.Active.Cases, col="lightgreen", lwd=2)
+legend("top", fill=c("cornsilk3", "lightblue", "lightpink", "lightgreen"), legend=c("cases", "recovered", "deaths", "active"))
+```
+# 4. Modelling Data
+# Forecasting total kasus COVID-19 di Indonesia
+```{r}
+Totalkasus <- (indo_cases$Total.Cases)
+plot(Totalkasus, main =" Plot Total Kasus COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+Totalkasuss <- diff(Totalkasus)
+plot(Totalkasuss, main =" Plot Total Kasus COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+summary(Totalkasuss)
+```
+```{r}
+Totalkasus1 <- diff(Totalkasuss)
+plot(Totalkasus1, main =" Plot Total Kasus COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+# Melakukan Cek stationer data
+adf.test(Totalkasus1,"stationary", k=0)
+```
+```{r}
+acf(Totalkasus1, na.action = na.omit)
+```
+```{r}
+pacf(Totalkasus1, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(indo_cases$Total.Cases, trace=TRUE)
+```
+# Model ARIMA terbaik adalah ARIMA (1,2,1) untuk total kasus
+```{r}
+# Fit ARIMA
+fitarimaTKIndo <- arima(indo_cases$Total.Cases, order=c(1,2,1))
+coeftest(fitarimaTKIndo)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Kasus di Indonesia untuk 5 bulan kedepan
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (1,2,1) untuk total kasus di Indonesia
+fitarimadrift_totalkasus <- Arima (indo_cases$Total.Cases,order = c(1,2,1), include.drift = TRUE)
+forecast5month_totalkasus <- forecast(fitarimadrift_totalkasus, h=150, level=c(80,95))
+plot(forecast5month_totalkasus)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan total kasus untuk 5 Bulan kedepan.
+```{r}
+# Melihat nilai MAPE dari Model
+summary(fitarimadrift_totalkasus)
+```
+Nilai MAPE dari Model sebesar 1%, artinya tingkat akurasi dari model dalam melakukan prediksi 99%, artinya model sangat akurat dalam melakukan prediksi total kasus di Indonesia
+```{r}
+# Perkiraan untuk Total Kasus untuk 5 bulan kedepan di Indonesia 
+round(forecast5month_totalkasus$mean)
+```
+```{r}
+summary(forecast5month_totalkasus)
+```
+
+```{r}
+# lihat prediksi berdasarkan nilai bawah
+round(forecast5month_totalkasus$lower)
+```
+
+```{r}
+# lihat prediksi berdasarkan nilai atas
+round(forecast5month_totalkasus$upper)
+```
+
+# Forecasting Total kasus Meninggal COVID-19 di Indonesia
+```{r}
+Totalmeninggal <- (indo_cases$Total.Deaths)
+plot(Totalmeninggal, main =" Plot Total Kasus Meninggal COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+Totalmeninggall <- diff(Totalmeninggal)
+plot(Totalmeninggall, main =" Plot Total Kasus Meninggal COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+summary(Totalmeninggall)
+```
+```{r}
+Totalmeninggal1 <- diff(Totalmeninggall)
+plot(Totalmeninggal1, main =" Plot Total Kasus Meninggal COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+# Melakukan Cek stationer data
+adf.test(Totalmeninggal1,"stationary", k=0)
+```
+```{r}
+acf(Totalmeninggal1, na.action = na.omit)
+```
+```{r}
+pacf(Totalmeninggal1, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(indo_cases$Total.Deaths, trace=TRUE)
+```
+# Model ARIMA terbaik adalah ARIMA (1,2,1) untuk total meninggal
+```{r}
+# Fit ARIMA
+fitarimaTMIndo <- arima(indo_cases$Total.Deaths, order=c(0,2,1))
+coeftest(fitarimaTMIndo)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Meninggal di Indonesia untuk 5 bulan kedepan
+
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (0,2,1) untuk total kasus meninggal di Indonesia
+fitarimadrift_totalmeninggal <- Arima (indo_cases$Total.Deaths, order = c(0,2,1), include.drift = TRUE)
+forecast5month_totalmeninggal <- forecast(fitarimadrift_totalmeninggal, h=150, level=c(80,95))
+plot(forecast5month_totalmeninggal)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan total kasus meninggal untuk 5 Bulan kedepan.
+
+```{r}
+summary(fitarimadrift_totalmeninggal)
+```
+```{r}
+# Perkiraan untuk mTotal Meninggal untuk 5 bulan kedepan di Indonesia 
+round(forecast5month_totalmeninggal$mean)
+```
+# Forecasting Total kasus Pulih COVID-19 di Indonesia
+```{r}
+TotalPulih <- (indo_cases$Total.Recovered)
+plot(TotalPulih, main =" Plot Total Kasus Pulih COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+TotalPulihh <- diff(TotalPulih)
+plot(TotalPulihh, main =" Plot Total Kasus Pulih COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+summary(TotalPulihh)
+```
+```{r}
+TotalPulih1 <- diff(TotalPulihh)
+plot(TotalPulih1, main =" Plot Total Kasus Pulih COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+# Melakukan Cek stationer data
+adf.test(TotalPulih1,"stationary", k=0)
+```
+```{r}
+acf(TotalPulih1, na.action = na.omit)
+```
+```{r}
+pacf(TotalPulih1, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(indo_cases$Total.Recovered, trace=TRUE)
+```
+# Model ARIMA terbaik adalah ARIMA (0,2,1) untuk total Pulih
+```{r}
+# Fit ARIMA
+fitarimaTPIndo <- arima(indo_cases$Total.Recovered, order=c(0,2,1))
+coeftest(fitarimaTPIndo)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Pulih di Indonesia untuk 5 bulan kedepan
+
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (0,2,1) untuk total kasus Pulih di Indonesia
+fitarimadrift_totalpulih <- Arima (indo_cases$Total.Recovered, order = c(0,2,1), include.drift = TRUE)
+forecast5month_totalpulih <- forecast(fitarimadrift_totalpulih, h=150, level=c(80,95))
+plot(forecast5month_totalpulih)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan total kasus Pulih untuk 5 Bulan kedepan.
+
+```{r}
+summary(fitarimadrift_totalpulih)
+```
+```{r}
+# Perkiraan untuk Total Pulih untuk 5 bulan kedepan di Indonesia 
+round(forecast5month_totalpulih$mean)
+```
+# Forecasting Total kasus Aktif COVID-19 di Indonesia
+```{r}
+Totalaktiff <- (indo_cases$Total.Active.Cases)
+plot(Totalaktiff, main =" Plot Total Kasus Aktif COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+Totalaktif <- diff(Totalaktiff)
+plot(Totalaktif, main =" Plot Total Kasus Aktif COVID-19 di Indonesia", col = "magenta")
+```
+```{r}
+summary(Totalaktif)
+```
+
+```{r}
+# Melakukan Cek stationer data
+adf.test(Totalaktif,"stationary", k=0)
+```
+```{r}
+acf(Totalaktif, na.action = na.omit)
+```
+```{r}
+pacf(Totalaktif, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(indo_cases$Total.Active.Cases, trace=TRUE)
+```
+```{r}
+view(indo_cases)
+```
+
+# Model ARIMA terbaik adalah ARIMA (1,2,1) untuk total kasus aktif
+```{r}
+# Fit ARIMA
+fitarimaTAIndo <- arima(indo_cases$Total.Active.Cases, order=c(1,2,1))
+coeftest(fitarimaTAIndo)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Kasus Aktif di Indonesia untuk 5 bulan kedepan
+
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (1,2,1) untuk total Kasus Aktif di Indonesia
+fitarimadrift_totalaktif <- Arima (indo_cases$Total.Active.Cases, order = c(1,2,1), include.drift = TRUE)
+forecast5month_totalaktif <- forecast(fitarimadrift_totalaktif, h=150, level=c(80,95))
+plot(forecast5month_totalaktif)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan jumlah Kasus Aktif untuk 5 Bulan kedepan.
+
+```{r}
+summary(fitarimadrift_totalaktif)
+```
+```{r}
+# Perkiraan untuk Total Kasus Aktif untuk 5 bulan kedepan di Indonesia 
+round(forecast5month_totalaktif$mean)
+```
+# Forecasting Total Kasus COVID-19 di Sumatera Utara
+```{r}
+TKasussumutt <- (su_cases$Total.Cases)
+plot(TKasussumutt, main =" Plot Total Kasus COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+TKasussumut <- diff(TKasussumutt)
+plot(TKasussumut, main =" Plot Total Kasus COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+summary(TKasussumut)
+```
+```{r}
+TKasussumut1 <- diff(TKasussumut)
+plot(TKasussumut1, main =" Plot Total Kasus COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+# Melakukan Cek stationer data
+adf.test(TKasussumut1,"stationary", k=0)
+```
+```{r}
+acf(TKasussumut1, na.action = na.omit)
+```
+```{r}
+pacf(TKasussumut1, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(su_cases$Total.Cases, trace=TRUE)
+```
+# Model ARIMA terbaik adalah ARIMA (2,2,3) untuk total kasus baru
+```{r}
+# Fit ARIMA
+fitarimaTKSumut <- arima(su_cases$Total.Cases, order=c(2,2,3))
+coeftest(fitarimaTKSumut)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Kasus di Sumatera Utara untuk 5 bulan kedepan
+
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (2,2,3) untuk total kasus baru di Sumatera Utara
+fitarimadrift_totalkasussumut <- Arima (su_cases$Total.Cases, order = c(2,2,3), include.drift = TRUE)
+forecast5month_totalkasussumut <- forecast(fitarimadrift_totalkasussumut, h=150, level=c(80,95))
+plot(forecast5month_totalkasussumut)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan jumlah kasus untuk 5 Bulan kedepan.
+
+```{r}
+# Melihat nilai MAPE dari Model
+summary(fitarimadrift_totalkasussumut)
+```
+Nilai MAPE dari Model sebesar 2%, artinya tingkat akurasi dari model dalam melakukan prediksi 98%, artinya model sangat akurat dalam melakukan prediksi total kasus baru di Sumatera Utara
+
+```{r}
+# Perkiraan untuk Total Kasus untuk 5 bulan kedepan di Sumatera Utara 
+round(forecast5month_totalkasussumut$mean)
+```
+```{r}
+round(forecast5month_totalkasussumut$lower)
+```
+```{r}
+round(forecast5month_totalkasussumut$upper)
+```
+
+# Forecasting Total kasus Meninggal COVID-19 di Sumatera Utara
+```{r}
+Tmeninggalsumut <- diff(su_cases$Total.Deaths)
+plot(Tmeninggalsumut, main =" Plot Total Meninggal COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+summary(Tmeninggalsumut)
+```
+```{r}
+Tmeninggalsumut1 <- diff(Tmeninggalsumut)
+plot(Tmeninggalsumut1, main =" Plot Total Meninggal COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+# Melakukan Cek stationer data
+adf.test(Tmeninggalsumut1,"stationary", k=0)
+```
+```{r}
+acf(Tmeninggalsumut1, na.action = na.omit)
+```
+```{r}
+pacf(Tmeninggalsumut1, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(su_cases$Total.Deaths, trace=TRUE)
+```
+# Model ARIMA terbaik adalah ARIMA (0,2,1) untuk total meninggal
+```{r}
+# Fit ARIMA
+fitarimaTKMS <- arima(su_cases$Total.Deaths, order=c(0,2,1))
+coeftest(fitarimaTKMS)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Meninggal di Sumatera Utara untuk 5 bulan kedepan
+
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (0,2,1) untuk total kasus meninggal di Sumatera Utara
+fitarimadrift_totalmeninggalsumut <- Arima (su_cases$Total.Deaths, order = c(0,2,1), include.drift = TRUE)
+forecast5month_totalmeninggalsumut <- forecast(fitarimadrift_totalmeninggalsumut, h=150, level=c(80,95))
+plot(forecast5month_totalmeninggalsumut)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan jumlah kasus meninggal untuk 5 Bulan kedepan.
+
+```{r}
+# Perkiraan untuk mTotal Meninggal untuk 5 bulan kedepan di Sumatera Utara 
+round(forecast5month_totalmeninggalsumut$mean)
+```
+```{r}
+summary(fitarimadrift_totalmeninggalsumut)
+```
+# Forecasting Total kasus Pulih COVID-19 di Sumatera Utara
+```{r}
+TPulihsumutt <- (su_cases$Total.Recovered)
+plot(TPulihsumutt, main =" Plot Total Pulih COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+TPulihsumut <- diff(TPulihsumutt)
+plot(TPulihsumut, main =" Plot Total Pulih COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+summary(TPulihsumut)
+```
+```{r}
+TPulihsumut1 <- diff(TPulihsumut)
+plot(TPulihsumut1, main =" Plot Total Pulih COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+# Melakukan Cek stationer data
+adf.test(TPulihsumut1,"stationary", k=0)
+```
+```{r}
+acf(TPulihsumut1, na.action = na.omit)
+```
+```{r}
+pacf(TPulihsumut1, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(su_cases$Total.Recovered, trace=TRUE)
+```
+# Model ARIMA terbaik adalah ARIMA (0,2,2) untuk total Pulih
+```{r}
+# Fit ARIMA
+fitarimaTKPS <- arima(su_cases$Total.Recovered, order=c(0,2,2))
+coeftest(fitarimaTKPS)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Pulih di Sumatera Utara untuk 5 bulan kedepan
+
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (0,2,2) untuk total kasus Pulih di Sumatera Utara
+fitarimadrift_totalpulihsumut <- Arima (su_cases$Total.Recovered, order = c(0,2,2), include.drift = TRUE)
+forecast5month_totalpulihsumut <- forecast(fitarimadrift_totalpulihsumut, h=150, level=c(80,95))
+plot(forecast5month_totalpulihsumut)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan jumlah kasus Pulih untuk 5 Bulan kedepan.
+
+```{r}
+# Perkiraan untuk Total Pulih untuk 5 bulan kedepan di Sumatera Utara 
+round(forecast5month_totalpulihsumut$mean)
+```
+```{r}
+summary(fitarimadrift_totalpulihsumut)
+```
+# Forecasting Total kasus Aktif COVID-19 di Sumatera Utara
+```{r}
+TAktifsumutt <- (su_cases$Total.Active.Cases)
+plot(TAktifsumutt, main =" Plot Total Kasus Aktif COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+TAktifsumut <- diff(TAktifsumutt)
+plot(TAktifsumut, main =" Plot Total Kasus Aktif COVID-19 di Sumatera Utara", col = "magenta")
+```
+```{r}
+summary(TAktifsumut)
+```
+```{r}
+# Melakukan Cek stationer data
+adf.test(TAktifsumut,"stationary", k=0)
+```
+```{r}
+acf(TAktifsumut, na.action = na.omit)
+```
+```{r}
+pacf(TAktifsumut, na.action = na.omit)
+```
+# Model Forecasting dengan ARIMA
+```{r}
+# ARIMA Model
+auto.arima(su_cases$Total.Active.Cases, trace=TRUE)
+```
+# Model ARIMA terbaik adalah ARIMA (0,2,1) untuk total kasus aktif
+```{r}
+# Fit ARIMA
+fitarimaTKAS <- arima(su_cases$Total.Active.Cases, order=c(0,2,1))
+coeftest(fitarimaTKAS)
+```
+Semua estimasi nilai signfikannya p value < 0,05. Langkah selanjutnya kita akan memprediksi nilai dari masa depan untuk Total Kasus Aktif di Sumatera Utara untuk 5 bulan kedepan
+
+```{r}
+# Visualisasi hasil forecasting dengan Model ARIMA (0,2,1) untuk total Kasus Aktif di Sumatera Utara
+fitarimadrift_totalaktifsumut <- Arima (su_cases$Total.Active.Cases, order = c(0,2,1), include.drift = TRUE)
+forecast5month_totalaktifsumut <- forecast(fitarimadrift_totalaktifsumut, h=150, level=c(80,95))
+plot(forecast5month_totalaktifsumut)
+```
+Dengan tingkat kepercayaan 80% hingga 95% untuk interval prediksi. Bagian yang lebih gelap untuk Confiden interval (CI) 80% dan bagian yang diarsir lebih terang untuk CI 95%. Dan bisa dilihat bahwa ada trend peningkatan jumlah Kasus Aktif untuk 5 Bulan kedepan.
+
+```{r}
+# Perkiraan untuk Total Kasus Aktif untuk 5 bulan kedepan di Sumatera Utara 
+round(forecast5month_totalaktifsumut$mean)
+```
+```{r}
+summary(fitarimadrift_totalaktifsumut)
+```
+
+```{r}
+# Memasukkan dataset dan hasil nilai forecast ke dalam excel
+write.table(indo_cases$Total.Cases, file="TKINDOO.csv")
+write.table(forecast5month_totalkasus$mean, file="TKINDOO1.csv")
+
+write.table(indo_cases$Total.Deaths, file="TMINDOO.csv")
+write.table(forecast5month_totalmeninggal$mean, file="TMINDOO1.csv")
+
+write.table(indo_cases$Total.Recovered, file="TPINDOO.csv")
+write.table(forecast5month_totalpulih$mean, file="TPINDOO1.csv")
+
+write.table(indo_cases$Total.Active.Cases, file="TAINDOO.csv")
+write.table(forecast5month_totalaktif$mean, file="TAINDOO1.csv")
+
+write.table(su_cases$Total.Cases, file="TKSUMUTT.csv")
+write.table(forecast5month_totalkasussumut$mean, file="TKSUMUTT1.csv")
+
+write.table(su_cases$Total.Deaths, file="TMSUMUTT.csv")
+write.table(forecast5month_totalmeninggalsumut$mean, file="TMSUMUTT1.csv")
+
+write.table(su_cases$Total.Recovered, file="TPSUMUTT.csv")
+write.table(forecast5month_totalpulihsumut$mean, file="TPSUMUTT1.csv")
+
+write.table(su_cases$Total.Active.Cases, file="TASUMUTT.csv")
+write.table(forecast5month_totalaktifsumut$mean, file="TASUMUTT1.csv")
+```
+
+```{r}
+library(readr)
+FORECASTTT <- read_delim("D:/FORECASTTT.csv", 
+    ";", quote = "\\\"", escape_double = FALSE, 
+    trim_ws = TRUE)
+head(FORECASTTT)
+```
+
+```{r}
+# Visualisasi hasil forecasting COVID-19 keseluruhan di Indonesia
+plot(FORECASTTT$Total.Kasus.Indo,
+     pch=19, 
+     cex=0.3, 
+     main="Forecast COVID-19 Cases in Indonesia",
+     sub="Data as of 30th May 2021",
+     las=1,
+     col="red",lwd=2,lty="dashed",
+     xlab="", ylab="")
+lines(FORECASTTT$Total.Pulih.Indo , col="green", lwd=2)
+lines(FORECASTTT$Total.Aktif.Indo , col="blue", lwd=2)
+lines(FORECASTTT$Total.Meninggal.Indo , col="purple", lwd=2)
+legend("top", fill=c("red", "green", "blue", "purple"), legend=c("Cases", "Recovered", "Active", "Deaths"))
+```
+
+```{r}
+# Visualisasi hasil forecasting COVID-19 keseluruhan di Sumatera Utara
+plot(FORECASTTT$Total.Kasus.Sumut,
+     pch=19, 
+     cex=0.3, 
+     main="Forecast COVID-19 Cases in Sumatera Utara",
+     sub="Data as of 30th May 2021",
+     las=1,
+     col="red",lwd=2,lty="dashed",
+     xlab="", ylab="")
+lines(FORECASTTT$Total.Pulih.Sumut , col="green", lwd=2)
+lines(FORECASTTT$Total.Aktif.Sumut , col="blue", lwd=2)
+lines(FORECASTTT$Total.Meninggal.Sumut , col="purple", lwd=2)
+legend("top", fill=c("red", "green", "blue", "purple"), legend=c("Cases", "Recovered", "Active", "Deaths"))
+```
